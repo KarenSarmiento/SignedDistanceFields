@@ -26,6 +26,7 @@ out vec3 color;
 #define SHAPEIL 3
 #define SHAPEOR 4
 #define SHAPEIR 5
+#define FLOOR 6
 
 #define GRADIENT(pt, func) vec3( \
     func(vec3(pt.x + 0.0001, pt.y, pt.z)) - func(vec3(pt.x - 0.0001, pt.y, pt.z)), \
@@ -91,6 +92,13 @@ float shapeOR(vec3 pt) {
   return max(cubeOR, sphereOR);
 }
 
+// floor positioned at y = 1.
+float floorPlane(vec3 pt) {
+  return pt.y +1;
+}
+
+// 2D version are the same as 3D with z plane removed.
+
 vec3 getNormal(vec3 pt, int shapeType) {
   if (shapeType == CUBE)
       return normalize(GRADIENT(pt, cube));
@@ -104,9 +112,32 @@ vec3 getNormal(vec3 pt, int shapeType) {
       return normalize(GRADIENT(pt, shapeOL));
   else if (shapeType == SHAPEOR)
       return normalize(GRADIENT(pt, shapeOR));
+  else if (shapeType == FLOOR)
+      return normalize(GRADIENT(pt, floorPlane));
 }
 
-vec3 getColor(vec3 pt) {
+vec3 getColor(vec3 pt, int shapeType) {
+  if (shapeType == FLOOR) {
+    // calculate min distance to other objects from current position and return
+    // colour based off of this value.
+    float shapeOL = shapeOL(pt);
+    float shapeIL = shapeIL(pt);
+    float shapeOR = shapeOR(pt);
+    float shapeIR = shapeIR(pt);
+
+    float d = min(min(shapeOL, shapeOR), min(shapeIL, shapeIR));
+
+    // turn pixel black if d % 5 is in the range [4.75, 5)
+    float d_black = d - floor(d / 5)*5;
+    if (d_black >= 4.75) {
+      return vec3(0, 0, 0);
+    }
+    // Gives a value in the range [0,1)
+    float d_dec = d - floor(d);
+
+    // We wish to get a color within the range green (0.4, 1, 0.4) and (0.4, 0.4, 1)
+    return vec3(0.4, 1 - 0.6 * d_dec, 0.4 + 0.6 * d_dec);
+  }
   return vec3(1);
 }
 
@@ -127,22 +158,14 @@ float shade(vec3 eye, vec3 pt, vec3 n) {
 vec3 illuminate(vec3 camPos, vec3 rayDir, vec3 pt, int shapeType) {
   vec3 c, n;
   n = getNormal(pt, shapeType);
-  c = getColor(pt);
+  c = getColor(pt, shapeType);
   return shade(camPos, pt, n) * c;
 }
 
 ///////////////////////////////////////////////////////////////////////////////}
 
-int minVal(float a, float b) {
-  if (a < b)
-    return 0;
-  return 1;
-}
-
-int maxVal(float a, float b) {
-  if (a > b)
-    return 0;
-  return 1;
+bool isSmallest(float val, float a, float b, float c, float d) {
+    return (val <= a && val <= b && val <= c && val <= d);
 }
 
 vec3 raymarch(vec3 camPos, vec3 rayDir) {
@@ -157,17 +180,21 @@ vec3 raymarch(vec3 camPos, vec3 rayDir) {
     float shapeOR = shapeOR(camPos + t * rayDir);
     float shapeIR = shapeIR(camPos + t * rayDir);
 
-    d = min(min(shapeOL, shapeOR), min(shapeIL, shapeIR));
+    float floor = floorPlane(camPos + t * rayDir);
+
+    d = min(floor, min(min(shapeOL, shapeOR), min(shapeIL, shapeIR)));
 
     // Determine shape that calculated the sdf to illuminate properly
-    if (shapeOL <= shapeOR && shapeOL <= shapeIR && shapeOL <= shapeIL)
+    if (isSmallest(shapeOL, shapeOR, shapeIL, shapeIR, floor))
       takenShape = SHAPEOL;
-    else if (shapeOR <= shapeOL && shapeOR <= shapeIR && shapeOR <= shapeIL)
+    else if (isSmallest(shapeOR, shapeOL, shapeIL, shapeIR, floor))
       takenShape = SHAPEOR;
-    else if (shapeIL <= shapeOR && shapeIL <= shapeIR && shapeIL <= shapeOL)
+    else if (isSmallest(shapeIL, shapeOR, shapeOL, shapeIR, floor))
       takenShape = SHAPEIL;
-    else if (shapeIR <= shapeOR && shapeIR <= shapeOL && shapeIR <= shapeIL)
+    else if (isSmallest(shapeIR, shapeOR, shapeIL, shapeOL, floor))
       takenShape = SHAPEIR;
+    else if (isSmallest(floor, shapeOR, shapeIL, shapeOL, shapeIR))
+      takenShape = FLOOR;
     step++;
   }
 
