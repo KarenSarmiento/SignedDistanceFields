@@ -22,12 +22,8 @@ out vec3 color;
 
 #define CUBE 0
 #define SPHERE 1
-#define SHAPEOL 2
-#define SHAPEIL 3
-#define SHAPEOR 4
-#define SHAPEIR 5
-#define FLOOR 6
-#define TORUS 7
+#define FLOOR 2
+#define TORUS 3
 
 #define GRADIENT(pt, func) vec3( \
     func(vec3(pt.x + 0.0001, pt.y, pt.z)) - func(vec3(pt.x - 0.0001, pt.y, pt.z)), \
@@ -69,30 +65,6 @@ float cube(vec3 pt) {
     + length(max(d, 0.0));
 }
 
-float shapeIL(vec3 pt) {
-  float cubeIL = cube(pt - vec3(-3, 0, -3));
-  float sphereIL = sphere(pt - vec3(-2, 0, -2));
-  return min(cubeIL, sphereIL);
-}
-
-float shapeIR(vec3 pt) {
-  float cubeIR = cube(pt - vec3(3, 0, -3));
-  float sphereIR = sphere(pt - vec3(4, 0, -2));
-  return max(cubeIR, -sphereIR);
-}
-
-float shapeOL(vec3 pt) {
-  float cubeOL = cube(pt - vec3(-3, 0, 3));
-  float sphereOL = sphere(pt - vec3(-2, 0, 4));
-  return blendMin(cubeOL, sphereOL);
-}
-
-float shapeOR(vec3 pt) {
-  float cubeOR = cube(pt - vec3(3, 0, 3));
-  float sphereOR = sphere(pt - vec3(4, 0, 4));
-  return max(cubeOR, sphereOR);
-}
-
 // floor positioned at y = 1.
 float floorPlane(vec3 pt) {
   return pt.y +1;
@@ -102,25 +74,21 @@ float torus(vec3 pt) {
   // Shift to (0,3,0)
   pt -= vec3(0, 3, 0);
   vec2 t = vec2(3, 1);
-  vec2 q = vec2(length(pt.xz) - t.x, pt.y);
+  vec2 q = vec2(length(pt.xy) - t.x, pt.z);
   return length(q) - t.y;
 }
 
-// 2D version are the same as 3D with z plane removed.
+float torusAndFloor(vec3 pt) {
+  float torus = torus(pt);
+  float floor = floorPlane(pt);
+  return min(torus, floor);
+}
 
 vec3 getNormal(vec3 pt, int shapeType) {
   if (shapeType == CUBE)
       return normalize(GRADIENT(pt, cube));
   else if (shapeType == SPHERE)
       return normalize(GRADIENT(pt, sphere));
-  else if (shapeType == SHAPEIL)
-      return normalize(GRADIENT(pt, shapeIL));
-  else if (shapeType == SHAPEIR)
-      return normalize(GRADIENT(pt, shapeIR));
-  else if (shapeType == SHAPEOL)
-      return normalize(GRADIENT(pt, shapeOL));
-  else if (shapeType == SHAPEOR)
-      return normalize(GRADIENT(pt, shapeOR));
   else if (shapeType == FLOOR)
       return normalize(GRADIENT(pt, floorPlane));
   else if (shapeType == TORUS)
@@ -149,10 +117,25 @@ vec3 getColor(vec3 pt, int shapeType) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+float shadow(vec3 pt, vec3 lightPos, int shapeType) {
+  vec3 lightDir = normalize(lightPos - pt);
+  float kd = 1;
+  int step = 0;
+  for (float t = 0.1; t < length(lightPos - pt) && step < RENDER_DEPTH && kd > 0.001; ) {
+    float d = abs(torusAndFloor(pt + t * lightDir));
+    if (d < 0.001) {
+      kd = 0;
+    } else {
+      kd = min(kd, 16 * d / t);
+    }
+    t += d;
+    step++;
+  }
+  return kd;
+}
+
 float shade(vec3 eye, vec3 pt, vec3 n) {
   float val = 0;
-
-  val += 0.1;  // Ambient
 
   for (int i = 0; i < LIGHT_POS.length(); i++) {
     // the incidenct ray is the light position - the intersection
@@ -171,7 +154,12 @@ vec3 illuminate(vec3 camPos, vec3 rayDir, vec3 pt, int shapeType) {
   vec3 c, n;
   n = getNormal(pt, shapeType);
   c = getColor(pt, shapeType);
-  return shade(camPos, pt, n) * c;
+
+  float shadowCoefficient = 1.0;
+  for (int i = 0; i < LIGHT_POS.length(); i++) {
+    shadowCoefficient = min(shadowCoefficient, shadow(pt, LIGHT_POS[i], shapeType));
+  }
+  return shade(camPos, pt, n) * c * shadowCoefficient + 0.1 /*ambient*/;
 }
 
 ///////////////////////////////////////////////////////////////////////////////}
@@ -182,7 +170,6 @@ vec3 raymarch(vec3 camPos, vec3 rayDir) {
 
   int takenShape;
   for (float d = 1000; step < RENDER_DEPTH && abs(d) > CLOSE_ENOUGH; t += abs(d)) {
-    // O = outer, I = inner, L = left, R = right
     float torus = torus(camPos + t * rayDir);
     float floor = floorPlane(camPos + t * rayDir);
 
@@ -202,7 +189,7 @@ vec3 raymarch(vec3 camPos, vec3 rayDir) {
   } else if (showStepDepth) {
     return vec3(float(step) / RENDER_DEPTH);
   } else {
-    return illuminate(camPos, rayDir, camPos + t * rayDir, takenShape);
+    return illuminate(camPos, rayDir, camPos + t * rayDir, takenShape) ;
   }
 }
 
