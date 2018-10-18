@@ -27,6 +27,7 @@ out vec3 color;
 #define SHAPEOR 4
 #define SHAPEIR 5
 #define FLOOR 6
+#define TORUS 7
 
 #define GRADIENT(pt, func) vec3( \
     func(vec3(pt.x + 0.0001, pt.y, pt.z)) - func(vec3(pt.x - 0.0001, pt.y, pt.z)), \
@@ -97,6 +98,14 @@ float floorPlane(vec3 pt) {
   return pt.y +1;
 }
 
+float torus(vec3 pt) {
+  // Shift to (0,3,0)
+  pt -= vec3(0, 3, 0);
+  vec2 t = vec2(3, 1);
+  vec2 q = vec2(length(pt.xz) - t.x, pt.y);
+  return length(q) - t.y;
+}
+
 // 2D version are the same as 3D with z plane removed.
 
 vec3 getNormal(vec3 pt, int shapeType) {
@@ -114,18 +123,15 @@ vec3 getNormal(vec3 pt, int shapeType) {
       return normalize(GRADIENT(pt, shapeOR));
   else if (shapeType == FLOOR)
       return normalize(GRADIENT(pt, floorPlane));
+  else if (shapeType == TORUS)
+      return normalize(GRADIENT(pt, torus));
 }
 
 vec3 getColor(vec3 pt, int shapeType) {
   if (shapeType == FLOOR) {
     // calculate min distance to other objects from current position and return
     // colour based off of this value.
-    float shapeOL = shapeOL(pt);
-    float shapeIL = shapeIL(pt);
-    float shapeOR = shapeOR(pt);
-    float shapeIR = shapeIR(pt);
-
-    float d = min(min(shapeOL, shapeOR), min(shapeIL, shapeIR));
+    float d = torus(pt);
 
     // turn pixel black if d % 5 is in the range [4.75, 5)
     float d_black = d - floor(d / 5)*5;
@@ -149,6 +155,12 @@ float shade(vec3 eye, vec3 pt, vec3 n) {
   val += 0.1;  // Ambient
 
   for (int i = 0; i < LIGHT_POS.length(); i++) {
+    // the incidenct ray is the light position - the intersection
+    vec3 incidentRay = normalize(pt - LIGHT_POS[i]);
+    vec3 reflectedRay = reflect(incidentRay, n);
+    vec3 view = normalize(eye - pt);
+    val += pow(max(dot(reflectedRay, view), 0), 256);
+
     vec3 l = normalize(LIGHT_POS[i] - pt);
     val += max(dot(n, l), 0);
   }
@@ -164,10 +176,6 @@ vec3 illuminate(vec3 camPos, vec3 rayDir, vec3 pt, int shapeType) {
 
 ///////////////////////////////////////////////////////////////////////////////}
 
-bool isSmallest(float val, float a, float b, float c, float d) {
-    return (val <= a && val <= b && val <= c && val <= d);
-}
-
 vec3 raymarch(vec3 camPos, vec3 rayDir) {
   int step = 0;
   float t = 0;
@@ -175,26 +183,17 @@ vec3 raymarch(vec3 camPos, vec3 rayDir) {
   int takenShape;
   for (float d = 1000; step < RENDER_DEPTH && abs(d) > CLOSE_ENOUGH; t += abs(d)) {
     // O = outer, I = inner, L = left, R = right
-    float shapeOL = shapeOL(camPos + t * rayDir);
-    float shapeIL = shapeIL(camPos + t * rayDir);
-    float shapeOR = shapeOR(camPos + t * rayDir);
-    float shapeIR = shapeIR(camPos + t * rayDir);
-
+    float torus = torus(camPos + t * rayDir);
     float floor = floorPlane(camPos + t * rayDir);
 
-    d = min(floor, min(min(shapeOL, shapeOR), min(shapeIL, shapeIR)));
-
     // Determine shape that calculated the sdf to illuminate properly
-    if (isSmallest(shapeOL, shapeOR, shapeIL, shapeIR, floor))
-      takenShape = SHAPEOL;
-    else if (isSmallest(shapeOR, shapeOL, shapeIL, shapeIR, floor))
-      takenShape = SHAPEOR;
-    else if (isSmallest(shapeIL, shapeOR, shapeOL, shapeIR, floor))
-      takenShape = SHAPEIL;
-    else if (isSmallest(shapeIR, shapeOR, shapeIL, shapeOL, floor))
-      takenShape = SHAPEIR;
-    else if (isSmallest(floor, shapeOR, shapeIL, shapeOL, shapeIR))
+    if (torus < floor) {
+      d = torus;
+      takenShape = TORUS;
+    } else {
+      d = floor;
       takenShape = FLOOR;
+    }
     step++;
   }
 
