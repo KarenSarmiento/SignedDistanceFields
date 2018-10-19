@@ -157,11 +157,6 @@ float shade(vec3 eye, vec3 pt, vec3 n) {
 
   for (int i = 0; i < LIGHT_POS.length(); i++) {
     // the incidenct ray is the light position - the intersection
-    vec3 incidentRay = normalize(pt - LIGHT_POS[i]);
-    vec3 reflectedRay = reflect(incidentRay, n);
-    vec3 view = normalize(eye - pt);
-    val += pow(max(dot(reflectedRay, view), 0), 256);
-
     vec3 l = normalize(LIGHT_POS[i] - pt);
     val += max(dot(n, l), 0) * shadow(pt, LIGHT_POS[0]);
   }
