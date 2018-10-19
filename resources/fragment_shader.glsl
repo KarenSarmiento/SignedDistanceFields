@@ -23,7 +23,9 @@ out vec3 color;
 #define CUBE 0
 #define SPHERE 1
 #define FLOOR 2
-#define TORUS 3
+#define TORUSYZ 3
+#define TORUSXZ 4
+#define TORUSXY 5
 
 #define GRADIENT(pt, func) vec3( \
     func(vec3(pt.x + 0.0001, pt.y, pt.z)) - func(vec3(pt.x - 0.0001, pt.y, pt.z)), \
@@ -70,36 +72,50 @@ float floorPlane(vec3 pt) {
   return pt.y +1;
 }
 
-float torus(vec3 pt) {
-  // Shift to (0,3,0)
-  pt -= vec3(0, 3, 0);
-  vec2 t = vec2(3, 1);
-  vec2 q = vec2(length(pt.xy) - t.x, pt.z);
+float torusYZ(vec3 pt) {
+  vec2 t = vec2(3, 0.5);
+  vec2 q = vec2(sqrt(pow(mod(pt.z + 3, 8) - 3, 2) + pow(pt.y, 2)) - t.x, mod(pt.x + 3, 8) - 3);
   return length(q) - t.y;
 }
 
-float torusAndFloor(vec3 pt) {
-  float torus = torus(pt);
-  float floor = floorPlane(pt);
-  return min(torus, floor);
+float torusXY(vec3 pt) {
+  pt -= vec3(4, 0, 4);
+  vec2 t = vec2(3, 0.5);
+  vec2 q = vec2(sqrt(pow(mod(pt.x + 3, 8) - 3, 2) + pow(pt.y, 2)) - t.x, mod(pt.z + 3, 8) - 3);
+  return length(q) - t.y;
+}
+
+float torusXZ(vec3 pt) {
+  pt -= vec3(0, 0, 4);
+  vec2 t = vec2(3, 0.5);
+  vec2 q = vec2(sqrt(pow(mod(pt.x + 4, 8) - 4, 2) + pow(mod(pt.z + 4, 8) - 4, 2)) - t.x, pt.y);
+  return length(q) - t.y;
+}
+
+float allTorii(vec3 pt) {
+  return min(torusXZ(pt), min(torusXY(pt), torusYZ(pt)));
 }
 
 vec3 getNormal(vec3 pt, int shapeType) {
   if (shapeType == CUBE)
-      return normalize(GRADIENT(pt, cube));
+    return normalize(GRADIENT(pt, cube));
   else if (shapeType == SPHERE)
-      return normalize(GRADIENT(pt, sphere));
+    return normalize(GRADIENT(pt, sphere));
   else if (shapeType == FLOOR)
-      return normalize(GRADIENT(pt, floorPlane));
-  else if (shapeType == TORUS)
-      return normalize(GRADIENT(pt, torus));
+    return normalize(GRADIENT(pt, floorPlane));
+  else if (shapeType == TORUSYZ)
+    return normalize(GRADIENT(pt, torusYZ));
+  else if (shapeType == TORUSXY)
+    return normalize(GRADIENT(pt, torusXY));
+  else if (shapeType == TORUSXZ)
+    return normalize(GRADIENT(pt, torusXZ));
 }
 
 vec3 getColor(vec3 pt, int shapeType) {
   if (shapeType == FLOOR) {
     // calculate min distance to other objects from current position and return
     // colour based off of this value.
-    float d = torus(pt);
+    float d = allTorii(pt);
 
     // turn pixel black if d % 5 is in the range [4.75, 5)
     float d_black = d - floor(d / 5)*5;
@@ -122,7 +138,7 @@ float shadow(vec3 pt, vec3 lightPos, int shapeType) {
   float kd = 1;
   int step = 0;
   for (float t = 0.1; t < length(lightPos - pt) && step < RENDER_DEPTH && kd > 0.001; ) {
-    float d = abs(torusAndFloor(pt + t * lightDir));
+    float d = abs(allTorii(pt + t * lightDir));
     if (d < 0.001) {
       kd = 0;
     } else {
@@ -164,19 +180,33 @@ vec3 illuminate(vec3 camPos, vec3 rayDir, vec3 pt, int shapeType) {
 
 ///////////////////////////////////////////////////////////////////////////////}
 
+bool isSmallest(float val, float a, float b, float c) {
+  return (val < a && val < b && val < c);
+}
+
 vec3 raymarch(vec3 camPos, vec3 rayDir) {
   int step = 0;
   float t = 0;
 
   int takenShape;
   for (float d = 1000; step < RENDER_DEPTH && abs(d) > CLOSE_ENOUGH; t += abs(d)) {
-    float torus = torus(camPos + t * rayDir);
     float floor = floorPlane(camPos + t * rayDir);
 
+    float torusYZ = torusYZ(camPos + t * rayDir);
+    float torusXY = torusXY(camPos + t * rayDir);
+    float torusXZ = torusXZ(camPos + t * rayDir);
+
+
     // Determine shape that calculated the sdf to illuminate properly
-    if (torus < floor) {
-      d = torus;
-      takenShape = TORUS;
+    if (isSmallest(torusYZ, torusXZ, torusXY, floor)) {
+      d = torusYZ;
+      takenShape = TORUSYZ;
+    } else if (isSmallest(torusXZ, torusYZ, torusXY, floor)) {
+      d = torusXZ;
+      takenShape = TORUSXZ;
+    } else if (isSmallest(torusXY, torusYZ, torusXZ, floor)) {
+      d = torusXY;
+      takenShape = TORUSXY;
     } else {
       d = floor;
       takenShape = FLOOR;
